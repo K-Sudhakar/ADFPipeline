@@ -1,0 +1,403 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "factoryName": {
+      "type": "string"
+    },
+    "sqlConnectionString": {
+      "type": "securestring"
+    },
+    "blobConnectionString": {
+      "type": "securestring"
+    },
+    "blobContainer": {
+      "type": "string",
+      "defaultValue": "adf-backup"
+    },
+    "selfHostedIrName": {
+      "type": "string",
+      "defaultValue": "SelfHostedIR"
+    }
+  },
+  "resources": [
+    {
+      "name": "[concat(parameters('factoryName'), '/LS_OnPremSql')]",
+      "type": "Microsoft.DataFactory/factories/linkedServices",
+      "apiVersion": "2018-06-01",
+      "properties": {
+        "type": "SqlServer",
+        "parameters": {
+          "SqlConnectionString": {
+            "type": "String"
+          }
+        },
+        "typeProperties": {
+          "connectionString": "@{linkedService().SqlConnectionString}"
+        },
+        "connectVia": {
+          "referenceName": "[parameters('selfHostedIrName')]",
+          "type": "IntegrationRuntimeReference"
+        }
+      }
+    },
+    {
+      "name": "[concat(parameters('factoryName'), '/LS_AzureBlob')]",
+      "type": "Microsoft.DataFactory/factories/linkedServices",
+      "apiVersion": "2018-06-01",
+      "properties": {
+        "type": "AzureBlobStorage",
+        "parameters": {
+          "BlobConnectionString": {
+            "type": "String"
+          }
+        },
+        "typeProperties": {
+          "connectionString": "@{linkedService().BlobConnectionString}"
+        }
+      }
+    },
+    {
+      "name": "[concat(parameters('factoryName'), '/DS_OnPremSqlTable')]",
+      "type": "Microsoft.DataFactory/factories/datasets",
+      "apiVersion": "2018-06-01",
+      "dependsOn": [
+        "[concat(parameters('factoryName'), '/linkedServices/LS_OnPremSql')]"
+      ],
+      "properties": {
+        "type": "SqlServerTable",
+        "parameters": {
+          "schemaName": {
+            "type": "String"
+          },
+          "tableName": {
+            "type": "String"
+          },
+          "SqlConnectionString": {
+            "type": "String"
+          }
+        },
+        "linkedServiceName": {
+          "referenceName": "LS_OnPremSql",
+          "type": "LinkedServiceReference",
+          "parameters": {
+            "SqlConnectionString": "@dataset().SqlConnectionString"
+          }
+        },
+        "typeProperties": {
+          "tableName": "@{dataset().schemaName}.@{dataset().tableName}"
+        }
+      }
+    },
+    {
+      "name": "[concat(parameters('factoryName'), '/DS_OnPremSqlConfig')]",
+      "type": "Microsoft.DataFactory/factories/datasets",
+      "apiVersion": "2018-06-01",
+      "dependsOn": [
+        "[concat(parameters('factoryName'), '/linkedServices/LS_OnPremSql')]"
+      ],
+      "properties": {
+        "type": "SqlServerTable",
+        "parameters": {
+          "SqlConnectionString": {
+            "type": "String"
+          }
+        },
+        "linkedServiceName": {
+          "referenceName": "LS_OnPremSql",
+          "type": "LinkedServiceReference",
+          "parameters": {
+            "SqlConnectionString": "@dataset().SqlConnectionString"
+          }
+        },
+        "typeProperties": {
+          "tableName": "dbo.AdfBackupConfig"
+        }
+      }
+    },
+    {
+      "name": "[concat(parameters('factoryName'), '/DS_BlobParquet')]",
+      "type": "Microsoft.DataFactory/factories/datasets",
+      "apiVersion": "2018-06-01",
+      "dependsOn": [
+        "[concat(parameters('factoryName'), '/linkedServices/LS_AzureBlob')]"
+      ],
+      "properties": {
+        "type": "Parquet",
+        "parameters": {
+          "container": {
+            "type": "String"
+          },
+          "folderPath": {
+            "type": "String"
+          },
+          "fileName": {
+            "type": "String"
+          },
+          "BlobConnectionString": {
+            "type": "String"
+          }
+        },
+        "linkedServiceName": {
+          "referenceName": "LS_AzureBlob",
+          "type": "LinkedServiceReference",
+          "parameters": {
+            "BlobConnectionString": "@dataset().BlobConnectionString"
+          }
+        },
+        "typeProperties": {
+          "location": {
+            "type": "AzureBlobStorageLocation",
+            "container": "@dataset().container",
+            "folderPath": "@dataset().folderPath",
+            "fileName": "@dataset().fileName"
+          }
+        }
+      }
+    },
+    {
+      "name": "[concat(parameters('factoryName'), '/PL_BackupToParquet')]",
+      "type": "Microsoft.DataFactory/factories/pipelines",
+      "apiVersion": "2018-06-01",
+      "dependsOn": [
+        "[concat(parameters('factoryName'), '/datasets/DS_OnPremSqlConfig')]",
+        "[concat(parameters('factoryName'), '/datasets/DS_OnPremSqlTable')]",
+        "[concat(parameters('factoryName'), '/datasets/DS_BlobParquet')]"
+      ],
+      "properties": {
+        "parameters": {
+          "SqlConnectionString": {
+            "type": "String"
+          },
+          "BlobConnectionString": {
+            "type": "String"
+          },
+          "BlobContainer": {
+            "type": "String",
+            "defaultValue": "[parameters('blobContainer')]"
+          }
+        },
+        "activities": [
+          {
+            "name": "Lookup_BackupConfig",
+            "type": "Lookup",
+            "dependsOn": [],
+            "policy": {
+              "timeout": "7.00:00:00",
+              "retry": 0,
+              "retryIntervalInSeconds": 30,
+              "secureOutput": false,
+              "secureInput": false
+            },
+            "userProperties": [],
+            "typeProperties": {
+              "source": {
+                "type": "SqlServerSource",
+                "sqlReaderQuery": "SELECT TableSchema, TableName, TargetFolder FROM dbo.AdfBackupConfig WHERE BackupEnabled = 1"
+              },
+              "dataset": {
+                "referenceName": "DS_OnPremSqlConfig",
+                "type": "DatasetReference",
+                "parameters": {
+                  "SqlConnectionString": "@pipeline().parameters.SqlConnectionString"
+                }
+              },
+              "firstRowOnly": false
+            }
+          },
+          {
+            "name": "ForEach_Backup",
+            "type": "ForEach",
+            "dependsOn": [
+              {
+                "activity": "Lookup_BackupConfig",
+                "dependencyConditions": [
+                  "Succeeded"
+                ]
+              }
+            ],
+            "userProperties": [],
+            "typeProperties": {
+              "items": "@activity('Lookup_BackupConfig').output.value",
+              "isSequential": false,
+              "activities": [
+                {
+                  "name": "Copy_Table_To_Parquet",
+                  "type": "Copy",
+                  "dependsOn": [],
+                  "policy": {
+                    "timeout": "7.00:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                  },
+                  "userProperties": [],
+                  "typeProperties": {
+                    "source": {
+                      "type": "SqlServerSource"
+                    },
+                    "sink": {
+                      "type": "ParquetSink",
+                      "storeSettings": {
+                        "type": "AzureBlobStorageWriteSettings"
+                      },
+                      "formatSettings": {
+                        "type": "ParquetWriteSettings"
+                      }
+                    },
+                    "enableStaging": false
+                  },
+                  "inputs": [
+                    {
+                      "referenceName": "DS_OnPremSqlTable",
+                      "type": "DatasetReference",
+                      "parameters": {
+                        "schemaName": "@item().TableSchema",
+                        "tableName": "@item().TableName",
+                        "SqlConnectionString": "@pipeline().parameters.SqlConnectionString"
+                      }
+                    }
+                  ],
+                  "outputs": [
+                    {
+                      "referenceName": "DS_BlobParquet",
+                      "type": "DatasetReference",
+                      "parameters": {
+                        "container": "@pipeline().parameters.BlobContainer",
+                        "folderPath": "@item().TargetFolder",
+                        "fileName": "@{concat(item().TableSchema, '_', item().TableName, '.parquet')}",
+                        "BlobConnectionString": "@pipeline().parameters.BlobConnectionString"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "[concat(parameters('factoryName'), '/PL_RestoreFromParquet')]",
+      "type": "Microsoft.DataFactory/factories/pipelines",
+      "apiVersion": "2018-06-01",
+      "dependsOn": [
+        "[concat(parameters('factoryName'), '/datasets/DS_OnPremSqlConfig')]",
+        "[concat(parameters('factoryName'), '/datasets/DS_OnPremSqlTable')]",
+        "[concat(parameters('factoryName'), '/datasets/DS_BlobParquet')]"
+      ],
+      "properties": {
+        "parameters": {
+          "SqlConnectionString": {
+            "type": "String"
+          },
+          "BlobConnectionString": {
+            "type": "String"
+          },
+          "BlobContainer": {
+            "type": "String",
+            "defaultValue": "[parameters('blobContainer')]"
+          }
+        },
+        "activities": [
+          {
+            "name": "Lookup_RestoreConfig",
+            "type": "Lookup",
+            "dependsOn": [],
+            "policy": {
+              "timeout": "7.00:00:00",
+              "retry": 0,
+              "retryIntervalInSeconds": 30,
+              "secureOutput": false,
+              "secureInput": false
+            },
+            "userProperties": [],
+            "typeProperties": {
+              "source": {
+                "type": "SqlServerSource",
+                "sqlReaderQuery": "SELECT TableSchema, TableName, TargetFolder FROM dbo.AdfBackupConfig WHERE RestoreEnabled = 1"
+              },
+              "dataset": {
+                "referenceName": "DS_OnPremSqlConfig",
+                "type": "DatasetReference",
+                "parameters": {
+                  "SqlConnectionString": "@pipeline().parameters.SqlConnectionString"
+                }
+              },
+              "firstRowOnly": false
+            }
+          },
+          {
+            "name": "ForEach_Restore",
+            "type": "ForEach",
+            "dependsOn": [
+              {
+                "activity": "Lookup_RestoreConfig",
+                "dependencyConditions": [
+                  "Succeeded"
+                ]
+              }
+            ],
+            "userProperties": [],
+            "typeProperties": {
+              "items": "@activity('Lookup_RestoreConfig').output.value",
+              "isSequential": false,
+              "activities": [
+                {
+                  "name": "Copy_Parquet_To_Table",
+                  "type": "Copy",
+                  "dependsOn": [],
+                  "policy": {
+                    "timeout": "7.00:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                  },
+                  "userProperties": [],
+                  "typeProperties": {
+                    "source": {
+                      "type": "ParquetSource",
+                      "storeSettings": {
+                        "type": "AzureBlobStorageReadSettings"
+                      }
+                    },
+                    "sink": {
+                      "type": "SqlServerSink",
+                      "writeBehavior": "insert"
+                    },
+                    "enableStaging": false
+                  },
+                  "inputs": [
+                    {
+                      "referenceName": "DS_BlobParquet",
+                      "type": "DatasetReference",
+                      "parameters": {
+                        "container": "@pipeline().parameters.BlobContainer",
+                        "folderPath": "@item().TargetFolder",
+                        "fileName": "@{concat(item().TableSchema, '_', item().TableName, '.parquet')}",
+                        "BlobConnectionString": "@pipeline().parameters.BlobConnectionString"
+                      }
+                    }
+                  ],
+                  "outputs": [
+                    {
+                      "referenceName": "DS_OnPremSqlTable",
+                      "type": "DatasetReference",
+                      "parameters": {
+                        "schemaName": "@item().TableSchema",
+                        "tableName": "@item().TableName",
+                        "SqlConnectionString": "@pipeline().parameters.SqlConnectionString"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
