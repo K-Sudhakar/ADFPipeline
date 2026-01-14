@@ -163,9 +163,22 @@
       ],
       "properties": {
         "parameters": {
+          "StartDate": {
+            "type": "String"
+          },
+          "EndDate": {
+            "type": "String"
+          },
+          "RunId": {
+            "type": "String"
+          },
           "BlobContainer": {
             "type": "String",
             "defaultValue": "[parameters('blobContainer')]"
+          },
+          "IsSequential": {
+            "type": "Bool",
+            "defaultValue": false
           }
         },
         "activities": [
@@ -175,7 +188,7 @@
             "dependsOn": [],
             "policy": {
               "timeout": "7.00:00:00",
-              "retry": 0,
+              "retry": 1,
               "retryIntervalInSeconds": 30,
               "secureOutput": false,
               "secureInput": false
@@ -184,7 +197,7 @@
             "typeProperties": {
               "source": {
                 "type": "AzureSqlSource",
-                "sqlReaderQuery": "SELECT TableSchema, TableName, TargetFolder FROM dbo.AdfBackupConfig WHERE BackupEnabled = 1"
+                "sqlReaderQuery": "SELECT TableSchema, TableName, TargetFolder, FilterColumn, UseDateRange FROM dbo.AdfBackupConfig WHERE BackupEnabled = 1 AND (Enabled = 1 OR Enabled IS NULL)"
               },
               "dataset": {
                 "referenceName": "DS_OnPremSqlConfig",
@@ -207,15 +220,46 @@
             "userProperties": [],
             "typeProperties": {
               "items": "@activity('Lookup_BackupConfig').output.value",
-              "isSequential": false,
+              "isSequential": "@pipeline().parameters.IsSequential",
               "activities": [
+                {
+                  "name": "Log_Backup_Running",
+                  "type": "Script",
+                  "dependsOn": [],
+                  "policy": {
+                    "timeout": "00:30:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                  },
+                  "linkedServiceName": {
+                    "referenceName": "LS_OnPremSql",
+                    "type": "LinkedServiceReference"
+                  },
+                  "typeProperties": {
+                    "scripts": [
+                      {
+                        "type": "Query",
+                        "text": "@{concat('INSERT INTO dbo.AdfOrchestrationRunLog (RunId, OrchestrationName, PipelineName, StepName, TableSchema, TableName, Status, StartTimeUtc, RangeStartUtc, RangeEndUtc, CorrelationId) VALUES (''', pipeline().parameters.RunId, ''', ''Backup'', ''PL_BackupToParquet'', ''Backup'', ''', item().TableSchema, ''', ''', item().TableName, ''', ''Running'', SYSUTCDATETIME(), ''', pipeline().parameters.StartDate, ''', ''', pipeline().parameters.EndDate, ''', ''', pipeline().runId, ''')')}"
+                      }
+                    ]
+                  }
+                },
                 {
                   "name": "Copy_Table_To_Parquet",
                   "type": "Copy",
-                  "dependsOn": [],
+                  "dependsOn": [
+                    {
+                      "activity": "Log_Backup_Running",
+                      "dependencyConditions": [
+                        "Succeeded"
+                      ]
+                    }
+                  ],
                   "policy": {
                     "timeout": "7.00:00:00",
-                    "retry": 0,
+                    "retry": 1,
                     "retryIntervalInSeconds": 30,
                     "secureOutput": false,
                     "secureInput": false
@@ -223,7 +267,8 @@
                   "userProperties": [],
                   "typeProperties": {
                     "source": {
-                      "type": "AzureSqlSource"
+                      "type": "AzureSqlSource",
+                      "sqlReaderQuery": "@{if(or(equals(item().UseDateRange, 0), equals(item().FilterColumn, null)), concat('SELECT * FROM [', item().TableSchema, '].[', item().TableName, ']'), concat('SELECT * FROM [', item().TableSchema, '].[', item().TableName, '] WHERE [', item().FilterColumn, '] >= ''', pipeline().parameters.StartDate, ''' AND [', item().FilterColumn, '] < ''', pipeline().parameters.EndDate, ''''))}"
                     },
                     "sink": {
                       "type": "ParquetSink",
@@ -252,11 +297,413 @@
                       "type": "DatasetReference",
                       "parameters": {
                         "container": "@pipeline().parameters.BlobContainer",
-                        "folderPath": "@item().TargetFolder",
-                        "fileName": "@{concat(item().TableSchema, '_', item().TableName, '.parquet')}"
+                        "folderPath": "@{concat(item().TargetFolder, '/dt=', formatDateTime(pipeline().parameters.StartDate,'yyyyMMdd'), '_', formatDateTime(pipeline().parameters.EndDate,'yyyyMMdd'))}",
+                        "fileName": "@{concat(item().TableSchema, '_', item().TableName, '_', formatDateTime(pipeline().parameters.StartDate,'yyyyMMdd'), '_', formatDateTime(pipeline().parameters.EndDate,'yyyyMMdd'), '.parquet')}"
                       }
                     }
                   ]
+                },
+                {
+                  "name": "Log_Backup_Succeeded",
+                  "type": "Script",
+                  "dependsOn": [
+                    {
+                      "activity": "Copy_Table_To_Parquet",
+                      "dependencyConditions": [
+                        "Succeeded"
+                      ]
+                    }
+                  ],
+                  "policy": {
+                    "timeout": "00:30:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                  },
+                  "linkedServiceName": {
+                    "referenceName": "LS_OnPremSql",
+                    "type": "LinkedServiceReference"
+                  },
+                  "typeProperties": {
+                    "scripts": [
+                      {
+                        "type": "Query",
+                        "text": "@{concat('INSERT INTO dbo.AdfOrchestrationRunLog (RunId, OrchestrationName, PipelineName, StepName, TableSchema, TableName, Status, StartTimeUtc, EndTimeUtc, RangeStartUtc, RangeEndUtc, RowsCopied, OutputFile, CorrelationId) VALUES (''', pipeline().parameters.RunId, ''', ''Backup'', ''PL_BackupToParquet'', ''Backup'', ''', item().TableSchema, ''', ''', item().TableName, ''', ''Succeeded'', SYSUTCDATETIME(), SYSUTCDATETIME(), ''', pipeline().parameters.StartDate, ''', ''', pipeline().parameters.EndDate, ''', ', string(activity('Copy_Table_To_Parquet').output.rowsCopied), ', ''', concat(item().TargetFolder, '/dt=', formatDateTime(pipeline().parameters.StartDate,'yyyyMMdd'), '_', formatDateTime(pipeline().parameters.EndDate,'yyyyMMdd'), '/', item().TableSchema, '_', item().TableName, '_', formatDateTime(pipeline().parameters.StartDate,'yyyyMMdd'), '_', formatDateTime(pipeline().parameters.EndDate,'yyyyMMdd'), '.parquet'), ''', ''', pipeline().runId, ''')')}"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "name": "Log_Backup_Failed",
+                  "type": "Script",
+                  "dependsOn": [
+                    {
+                      "activity": "Copy_Table_To_Parquet",
+                      "dependencyConditions": [
+                        "Failed"
+                      ]
+                    }
+                  ],
+                  "policy": {
+                    "timeout": "00:30:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                  },
+                  "linkedServiceName": {
+                    "referenceName": "LS_OnPremSql",
+                    "type": "LinkedServiceReference"
+                  },
+                  "typeProperties": {
+                    "scripts": [
+                      {
+                        "type": "Query",
+                        "text": "@{concat('INSERT INTO dbo.AdfOrchestrationRunLog (RunId, OrchestrationName, PipelineName, StepName, TableSchema, TableName, Status, StartTimeUtc, EndTimeUtc, RangeStartUtc, RangeEndUtc, ErrorCode, ErrorMessage, CorrelationId) VALUES (''', pipeline().parameters.RunId, ''', ''Backup'', ''PL_BackupToParquet'', ''Backup'', ''', item().TableSchema, ''', ''', item().TableName, ''', ''Failed'', SYSUTCDATETIME(), SYSUTCDATETIME(), ''', pipeline().parameters.StartDate, ''', ''', pipeline().parameters.EndDate, ''', ''', activity('Copy_Table_To_Parquet').error.errorCode, ''', ''', replace(activity('Copy_Table_To_Parquet').error.message, '''', '\"\"'), ''', ''', pipeline().runId, ''')')}"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "[concat(parameters('factoryName'), '/PL_DeleteRecords')]",
+      "type": "Microsoft.DataFactory/factories/pipelines",
+      "apiVersion": "2018-06-01",
+      "dependsOn": [
+        "[resourceId('Microsoft.DataFactory/factories/linkedServices', parameters('factoryName'), 'LS_OnPremSql')]",
+        "[resourceId('Microsoft.DataFactory/factories/datasets', parameters('factoryName'), 'DS_OnPremSqlConfig')]"
+      ],
+      "properties": {
+        "parameters": {
+          "StartDate": {
+            "type": "String"
+          },
+          "EndDate": {
+            "type": "String"
+          },
+          "RunId": {
+            "type": "String"
+          },
+          "IsSequential": {
+            "type": "Bool",
+            "defaultValue": true
+          }
+        },
+        "activities": [
+          {
+            "name": "Lookup_DeleteConfig",
+            "type": "Lookup",
+            "dependsOn": [],
+            "policy": {
+              "timeout": "7.00:00:00",
+              "retry": 1,
+              "retryIntervalInSeconds": 30,
+              "secureOutput": false,
+              "secureInput": false
+            },
+            "userProperties": [],
+            "typeProperties": {
+              "source": {
+                "type": "AzureSqlSource",
+                "sqlReaderQuery": "SELECT TableSchema, TableName, FilterColumn, UseDateRange, AllowFullDelete FROM dbo.AdfBackupConfig WHERE DeleteEnabled = 1 AND (Enabled = 1 OR Enabled IS NULL)"
+              },
+              "dataset": {
+                "referenceName": "DS_OnPremSqlConfig",
+                "type": "DatasetReference"
+              },
+              "firstRowOnly": false
+            }
+          },
+          {
+            "name": "ForEach_Delete",
+            "type": "ForEach",
+            "dependsOn": [
+              {
+                "activity": "Lookup_DeleteConfig",
+                "dependencyConditions": [
+                  "Succeeded"
+                ]
+              }
+            ],
+            "userProperties": [],
+            "typeProperties": {
+              "items": "@activity('Lookup_DeleteConfig').output.value",
+              "isSequential": "@pipeline().parameters.IsSequential",
+              "activities": [
+                {
+                  "name": "Log_Delete_Running",
+                  "type": "Script",
+                  "dependsOn": [],
+                  "policy": {
+                    "timeout": "00:30:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                  },
+                  "linkedServiceName": {
+                    "referenceName": "LS_OnPremSql",
+                    "type": "LinkedServiceReference"
+                  },
+                  "typeProperties": {
+                    "scripts": [
+                      {
+                        "type": "Query",
+                        "text": "@{concat('INSERT INTO dbo.AdfOrchestrationRunLog (RunId, OrchestrationName, PipelineName, StepName, TableSchema, TableName, Status, StartTimeUtc, RangeStartUtc, RangeEndUtc, CorrelationId) VALUES (''', pipeline().parameters.RunId, ''', ''Delete'', ''PL_DeleteRecords'', ''Delete'', ''', item().TableSchema, ''', ''', item().TableName, ''', ''Running'', SYSUTCDATETIME(), ''', pipeline().parameters.StartDate, ''', ''', pipeline().parameters.EndDate, ''', ''', pipeline().runId, ''')')}"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "name": "If_Delete_With_Filter",
+                  "type": "IfCondition",
+                  "dependsOn": [
+                    {
+                      "activity": "Log_Delete_Running",
+                      "dependencyConditions": [
+                        "Succeeded"
+                      ]
+                    }
+                  ],
+                  "typeProperties": {
+                    "expression": {
+                      "value": "@{and(equals(item().UseDateRange, 1), not(equals(item().FilterColumn, null)))}",
+                      "type": "Expression"
+                    },
+                    "ifTrueActivities": [
+                      {
+                        "name": "Delete_Rows_Filtered",
+                        "type": "Script",
+                        "policy": {
+                          "timeout": "00:30:00",
+                          "retry": 0,
+                          "retryIntervalInSeconds": 30,
+                          "secureOutput": false,
+                          "secureInput": false
+                        },
+                        "linkedServiceName": {
+                          "referenceName": "LS_OnPremSql",
+                          "type": "LinkedServiceReference"
+                        },
+                        "typeProperties": {
+                          "scripts": [
+                            {
+                              "type": "Query",
+                              "text": "@{concat('DELETE FROM [', item().TableSchema, '].[', item().TableName, '] WHERE [', item().FilterColumn, '] >= ''', pipeline().parameters.StartDate, ''' AND [', item().FilterColumn, '] < ''', pipeline().parameters.EndDate, '''')}"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "name": "Log_Delete_Succeeded_Filtered",
+                        "type": "Script",
+                        "dependsOn": [
+                          {
+                            "activity": "Delete_Rows_Filtered",
+                            "dependencyConditions": [
+                              "Succeeded"
+                            ]
+                          }
+                        ],
+                        "policy": {
+                          "timeout": "00:30:00",
+                          "retry": 0,
+                          "retryIntervalInSeconds": 30,
+                          "secureOutput": false,
+                          "secureInput": false
+                        },
+                        "linkedServiceName": {
+                          "referenceName": "LS_OnPremSql",
+                          "type": "LinkedServiceReference"
+                        },
+                        "typeProperties": {
+                          "scripts": [
+                            {
+                              "type": "Query",
+                              "text": "@{concat('INSERT INTO dbo.AdfOrchestrationRunLog (RunId, OrchestrationName, PipelineName, StepName, TableSchema, TableName, Status, StartTimeUtc, EndTimeUtc, RangeStartUtc, RangeEndUtc, RowsDeleted, CorrelationId) VALUES (''', pipeline().parameters.RunId, ''', ''Delete'', ''PL_DeleteRecords'', ''Delete'', ''', item().TableSchema, ''', ''', item().TableName, ''', ''Succeeded'', SYSUTCDATETIME(), SYSUTCDATETIME(), ''', pipeline().parameters.StartDate, ''', ''', pipeline().parameters.EndDate, ''', NULL, ''', pipeline().runId, ''')')}"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "name": "Log_Delete_Failed_Filtered",
+                        "type": "Script",
+                        "dependsOn": [
+                          {
+                            "activity": "Delete_Rows_Filtered",
+                            "dependencyConditions": [
+                              "Failed"
+                            ]
+                          }
+                        ],
+                        "policy": {
+                          "timeout": "00:30:00",
+                          "retry": 0,
+                          "retryIntervalInSeconds": 30,
+                          "secureOutput": false,
+                          "secureInput": false
+                        },
+                        "linkedServiceName": {
+                          "referenceName": "LS_OnPremSql",
+                          "type": "LinkedServiceReference"
+                        },
+                        "typeProperties": {
+                          "scripts": [
+                            {
+                              "type": "Query",
+                              "text": "@{concat('INSERT INTO dbo.AdfOrchestrationRunLog (RunId, OrchestrationName, PipelineName, StepName, TableSchema, TableName, Status, StartTimeUtc, EndTimeUtc, RangeStartUtc, RangeEndUtc, ErrorCode, ErrorMessage, CorrelationId) VALUES (''', pipeline().parameters.RunId, ''', ''Delete'', ''PL_DeleteRecords'', ''Delete'', ''', item().TableSchema, ''', ''', item().TableName, ''', ''Failed'', SYSUTCDATETIME(), SYSUTCDATETIME(), ''', pipeline().parameters.StartDate, ''', ''', pipeline().parameters.EndDate, ''', ''', activity('Delete_Rows_Filtered').error.errorCode, ''', ''', replace(activity('Delete_Rows_Filtered').error.message, '''', '\"\"'), ''', ''', pipeline().runId, ''')')}"
+                            }
+                          ]
+                        }
+                      }
+                    ],
+                    "ifFalseActivities": [
+                      {
+                        "name": "If_Allow_Full_Delete",
+                        "type": "IfCondition",
+                        "typeProperties": {
+                          "expression": {
+                            "value": "@{equals(item().AllowFullDelete, 1)}",
+                            "type": "Expression"
+                          },
+                          "ifTrueActivities": [
+                            {
+                              "name": "Delete_Rows_Full",
+                              "type": "Script",
+                              "policy": {
+                                "timeout": "00:30:00",
+                                "retry": 0,
+                                "retryIntervalInSeconds": 30,
+                                "secureOutput": false,
+                                "secureInput": false
+                              },
+                              "linkedServiceName": {
+                                "referenceName": "LS_OnPremSql",
+                                "type": "LinkedServiceReference"
+                              },
+                              "typeProperties": {
+                                "scripts": [
+                                  {
+                                    "type": "Query",
+                                    "text": "@{concat('DELETE FROM [', item().TableSchema, '].[', item().TableName, ']')}"
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "name": "Log_Delete_Succeeded_Full",
+                              "type": "Script",
+                              "dependsOn": [
+                                {
+                                  "activity": "Delete_Rows_Full",
+                                  "dependencyConditions": [
+                                    "Succeeded"
+                                  ]
+                                }
+                              ],
+                              "policy": {
+                                "timeout": "00:30:00",
+                                "retry": 0,
+                                "retryIntervalInSeconds": 30,
+                                "secureOutput": false,
+                                "secureInput": false
+                              },
+                              "linkedServiceName": {
+                                "referenceName": "LS_OnPremSql",
+                                "type": "LinkedServiceReference"
+                              },
+                              "typeProperties": {
+                                "scripts": [
+                                  {
+                                    "type": "Query",
+                                    "text": "@{concat('INSERT INTO dbo.AdfOrchestrationRunLog (RunId, OrchestrationName, PipelineName, StepName, TableSchema, TableName, Status, StartTimeUtc, EndTimeUtc, RangeStartUtc, RangeEndUtc, RowsDeleted, CorrelationId) VALUES (''', pipeline().parameters.RunId, ''', ''Delete'', ''PL_DeleteRecords'', ''Delete'', ''', item().TableSchema, ''', ''', item().TableName, ''', ''Succeeded'', SYSUTCDATETIME(), SYSUTCDATETIME(), ''', pipeline().parameters.StartDate, ''', ''', pipeline().parameters.EndDate, ''', NULL, ''', pipeline().runId, ''')')}"
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "name": "Log_Delete_Failed_Full",
+                              "type": "Script",
+                              "dependsOn": [
+                                {
+                                  "activity": "Delete_Rows_Full",
+                                  "dependencyConditions": [
+                                    "Failed"
+                                  ]
+                                }
+                              ],
+                              "policy": {
+                                "timeout": "00:30:00",
+                                "retry": 0,
+                                "retryIntervalInSeconds": 30,
+                                "secureOutput": false,
+                                "secureInput": false
+                              },
+                              "linkedServiceName": {
+                                "referenceName": "LS_OnPremSql",
+                                "type": "LinkedServiceReference"
+                              },
+                              "typeProperties": {
+                                "scripts": [
+                                  {
+                                    "type": "Query",
+                                    "text": "@{concat('INSERT INTO dbo.AdfOrchestrationRunLog (RunId, OrchestrationName, PipelineName, StepName, TableSchema, TableName, Status, StartTimeUtc, EndTimeUtc, RangeStartUtc, RangeEndUtc, ErrorCode, ErrorMessage, CorrelationId) VALUES (''', pipeline().parameters.RunId, ''', ''Delete'', ''PL_DeleteRecords'', ''Delete'', ''', item().TableSchema, ''', ''', item().TableName, ''', ''Failed'', SYSUTCDATETIME(), SYSUTCDATETIME(), ''', pipeline().parameters.StartDate, ''', ''', pipeline().parameters.EndDate, ''', ''', activity('Delete_Rows_Full').error.errorCode, ''', ''', replace(activity('Delete_Rows_Full').error.message, '''', '\"\"'), ''', ''', pipeline().runId, ''')')}"
+                                  }
+                                ]
+                              }
+                            }
+                          ],
+                          "ifFalseActivities": [
+                            {
+                              "name": "Log_Delete_Blocked",
+                              "type": "Script",
+                              "policy": {
+                                "timeout": "00:30:00",
+                                "retry": 0,
+                                "retryIntervalInSeconds": 30,
+                                "secureOutput": false,
+                                "secureInput": false
+                              },
+                              "linkedServiceName": {
+                                "referenceName": "LS_OnPremSql",
+                                "type": "LinkedServiceReference"
+                              },
+                              "typeProperties": {
+                                "scripts": [
+                                  {
+                                    "type": "Query",
+                                    "text": "@{concat('INSERT INTO dbo.AdfOrchestrationRunLog (RunId, OrchestrationName, PipelineName, StepName, TableSchema, TableName, Status, StartTimeUtc, EndTimeUtc, RangeStartUtc, RangeEndUtc, ErrorCode, ErrorMessage, CorrelationId) VALUES (''', pipeline().parameters.RunId, ''', ''Delete'', ''PL_DeleteRecords'', ''Delete'', ''', item().TableSchema, ''', ''', item().TableName, ''', ''Failed'', SYSUTCDATETIME(), SYSUTCDATETIME(), ''', pipeline().parameters.StartDate, ''', ''', pipeline().parameters.EndDate, ''', ''FULL_DELETE_BLOCKED'', ''Full-table delete is blocked. Set UseDateRange=1 with FilterColumn or AllowFullDelete=1 in dbo.AdfBackupConfig.'', ''', pipeline().runId, ''')')}"
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "name": "Fail_Delete_Not_Allowed",
+                              "type": "Fail",
+                              "dependsOn": [
+                                {
+                                  "activity": "Log_Delete_Blocked",
+                                  "dependencyConditions": [
+                                    "Succeeded"
+                                  ]
+                                }
+                              ],
+                              "typeProperties": {
+                                "message": "Full-table delete is blocked. Set UseDateRange=1 with FilterColumn or AllowFullDelete=1 in dbo.AdfBackupConfig.",
+                                "errorCode": "FULL_DELETE_BLOCKED"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
                 }
               ]
             }
@@ -277,9 +724,22 @@
       ],
       "properties": {
         "parameters": {
+          "StartDate": {
+            "type": "String"
+          },
+          "EndDate": {
+            "type": "String"
+          },
+          "RunId": {
+            "type": "String"
+          },
           "BlobContainer": {
             "type": "String",
             "defaultValue": "[parameters('blobContainer')]"
+          },
+          "IsSequential": {
+            "type": "Bool",
+            "defaultValue": false
           }
         },
         "activities": [
@@ -289,7 +749,7 @@
             "dependsOn": [],
             "policy": {
               "timeout": "7.00:00:00",
-              "retry": 0,
+              "retry": 1,
               "retryIntervalInSeconds": 30,
               "secureOutput": false,
               "secureInput": false
@@ -298,7 +758,7 @@
             "typeProperties": {
               "source": {
                 "type": "AzureSqlSource",
-                "sqlReaderQuery": "SELECT TableSchema, TableName, TargetFolder FROM dbo.AdfBackupConfig WHERE RestoreEnabled = 1"
+                "sqlReaderQuery": "SELECT TableSchema, TableName, TargetFolder, UseDateRange FROM dbo.AdfBackupConfig WHERE RestoreEnabled = 1 AND (Enabled = 1 OR Enabled IS NULL)"
               },
               "dataset": {
                 "referenceName": "DS_OnPremSqlConfig",
@@ -321,15 +781,46 @@
             "userProperties": [],
             "typeProperties": {
               "items": "@activity('Lookup_RestoreConfig').output.value",
-              "isSequential": false,
+              "isSequential": "@pipeline().parameters.IsSequential",
               "activities": [
+                {
+                  "name": "Log_Restore_Running",
+                  "type": "Script",
+                  "dependsOn": [],
+                  "policy": {
+                    "timeout": "00:30:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                  },
+                  "linkedServiceName": {
+                    "referenceName": "LS_OnPremSql",
+                    "type": "LinkedServiceReference"
+                  },
+                  "typeProperties": {
+                    "scripts": [
+                      {
+                        "type": "Query",
+                        "text": "@{concat('INSERT INTO dbo.AdfOrchestrationRunLog (RunId, OrchestrationName, PipelineName, StepName, TableSchema, TableName, Status, StartTimeUtc, RangeStartUtc, RangeEndUtc, CorrelationId) VALUES (''', pipeline().parameters.RunId, ''', ''Restore'', ''PL_RestoreFromParquet'', ''Restore'', ''', item().TableSchema, ''', ''', item().TableName, ''', ''Running'', SYSUTCDATETIME(), ''', pipeline().parameters.StartDate, ''', ''', pipeline().parameters.EndDate, ''', ''', pipeline().runId, ''')')}"
+                      }
+                    ]
+                  }
+                },
                 {
                   "name": "Copy_Parquet_To_Table",
                   "type": "Copy",
-                  "dependsOn": [],
+                  "dependsOn": [
+                    {
+                      "activity": "Log_Restore_Running",
+                      "dependencyConditions": [
+                        "Succeeded"
+                      ]
+                    }
+                  ],
                   "policy": {
                     "timeout": "7.00:00:00",
-                    "retry": 0,
+                    "retry": 1,
                     "retryIntervalInSeconds": 30,
                     "secureOutput": false,
                     "secureInput": false
@@ -354,8 +845,8 @@
                       "type": "DatasetReference",
                       "parameters": {
                         "container": "@pipeline().parameters.BlobContainer",
-                        "folderPath": "@item().TargetFolder",
-                        "fileName": "@{concat(item().TableSchema, '_', item().TableName, '.parquet')}"
+                        "folderPath": "@{concat(item().TargetFolder, '/dt=', formatDateTime(pipeline().parameters.StartDate,'yyyyMMdd'), '_', formatDateTime(pipeline().parameters.EndDate,'yyyyMMdd'))}",
+                        "fileName": "@{concat(item().TableSchema, '_', item().TableName, '_', formatDateTime(pipeline().parameters.StartDate,'yyyyMMdd'), '_', formatDateTime(pipeline().parameters.EndDate,'yyyyMMdd'), '.parquet')}"
                       }
                     }
                   ],
@@ -369,6 +860,229 @@
                       }
                     }
                   ]
+                },
+                {
+                  "name": "Log_Restore_Succeeded",
+                  "type": "Script",
+                  "dependsOn": [
+                    {
+                      "activity": "Copy_Parquet_To_Table",
+                      "dependencyConditions": [
+                        "Succeeded"
+                      ]
+                    }
+                  ],
+                  "policy": {
+                    "timeout": "00:30:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                  },
+                  "linkedServiceName": {
+                    "referenceName": "LS_OnPremSql",
+                    "type": "LinkedServiceReference"
+                  },
+                  "typeProperties": {
+                    "scripts": [
+                      {
+                        "type": "Query",
+                        "text": "@{concat('INSERT INTO dbo.AdfOrchestrationRunLog (RunId, OrchestrationName, PipelineName, StepName, TableSchema, TableName, Status, StartTimeUtc, EndTimeUtc, RangeStartUtc, RangeEndUtc, RowsCopied, OutputFile, CorrelationId) VALUES (''', pipeline().parameters.RunId, ''', ''Restore'', ''PL_RestoreFromParquet'', ''Restore'', ''', item().TableSchema, ''', ''', item().TableName, ''', ''Succeeded'', SYSUTCDATETIME(), SYSUTCDATETIME(), ''', pipeline().parameters.StartDate, ''', ''', pipeline().parameters.EndDate, ''', ', string(activity('Copy_Parquet_To_Table').output.rowsCopied), ', ''', concat(item().TargetFolder, '/dt=', formatDateTime(pipeline().parameters.StartDate,'yyyyMMdd'), '_', formatDateTime(pipeline().parameters.EndDate,'yyyyMMdd'), '/', item().TableSchema, '_', item().TableName, '_', formatDateTime(pipeline().parameters.StartDate,'yyyyMMdd'), '_', formatDateTime(pipeline().parameters.EndDate,'yyyyMMdd'), '.parquet'), ''', ''', pipeline().runId, ''')')}"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "name": "Log_Restore_Failed",
+                  "type": "Script",
+                  "dependsOn": [
+                    {
+                      "activity": "Copy_Parquet_To_Table",
+                      "dependencyConditions": [
+                        "Failed"
+                      ]
+                    }
+                  ],
+                  "policy": {
+                    "timeout": "00:30:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                  },
+                  "linkedServiceName": {
+                    "referenceName": "LS_OnPremSql",
+                    "type": "LinkedServiceReference"
+                  },
+                  "typeProperties": {
+                    "scripts": [
+                      {
+                        "type": "Query",
+                        "text": "@{concat('INSERT INTO dbo.AdfOrchestrationRunLog (RunId, OrchestrationName, PipelineName, StepName, TableSchema, TableName, Status, StartTimeUtc, EndTimeUtc, RangeStartUtc, RangeEndUtc, ErrorCode, ErrorMessage, CorrelationId) VALUES (''', pipeline().parameters.RunId, ''', ''Restore'', ''PL_RestoreFromParquet'', ''Restore'', ''', item().TableSchema, ''', ''', item().TableName, ''', ''Failed'', SYSUTCDATETIME(), SYSUTCDATETIME(), ''', pipeline().parameters.StartDate, ''', ''', pipeline().parameters.EndDate, ''', ''', activity('Copy_Parquet_To_Table').error.errorCode, ''', ''', replace(activity('Copy_Parquet_To_Table').error.message, '''', '\"\"'), ''', ''', pipeline().runId, ''')')}"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "[concat(parameters('factoryName'), '/PL_Orchestrate_Backup_Delete_Restore')]",
+      "type": "Microsoft.DataFactory/factories/pipelines",
+      "apiVersion": "2018-06-01",
+      "dependsOn": [
+        "[resourceId('Microsoft.DataFactory/factories/pipelines', parameters('factoryName'), 'PL_BackupToParquet')]",
+        "[resourceId('Microsoft.DataFactory/factories/pipelines', parameters('factoryName'), 'PL_DeleteRecords')]",
+        "[resourceId('Microsoft.DataFactory/factories/pipelines', parameters('factoryName'), 'PL_RestoreFromParquet')]"
+      ],
+      "properties": {
+        "parameters": {
+          "StartDate": {
+            "type": "String"
+          },
+          "EndDate": {
+            "type": "String"
+          },
+          "RunId": {
+            "type": "String",
+            "defaultValue": "@{newGuid()}"
+          },
+          "DoBackup": {
+            "type": "Bool",
+            "defaultValue": true
+          },
+          "DoDelete": {
+            "type": "Bool",
+            "defaultValue": true
+          },
+          "DoRestore": {
+            "type": "Bool",
+            "defaultValue": true
+          }
+        },
+        "activities": [
+          {
+            "name": "Validate_DateRange",
+            "type": "IfCondition",
+            "dependsOn": [],
+            "typeProperties": {
+              "expression": {
+                "value": "@{less(pipeline().parameters.StartDate, pipeline().parameters.EndDate)}",
+                "type": "Expression"
+              },
+              "ifTrueActivities": [
+                {
+                  "name": "If_Do_Backup",
+                  "type": "IfCondition",
+                  "typeProperties": {
+                    "expression": {
+                      "value": "@{pipeline().parameters.DoBackup}",
+                      "type": "Expression"
+                    },
+                    "ifTrueActivities": [
+                      {
+                        "name": "Execute_Backup",
+                        "type": "ExecutePipeline",
+                        "typeProperties": {
+                          "pipeline": {
+                            "referenceName": "PL_BackupToParquet",
+                            "type": "PipelineReference"
+                          },
+                          "waitOnCompletion": true,
+                          "parameters": {
+                            "StartDate": "@pipeline().parameters.StartDate",
+                            "EndDate": "@pipeline().parameters.EndDate",
+                            "RunId": "@pipeline().parameters.RunId"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "name": "If_Do_Delete",
+                  "type": "IfCondition",
+                  "dependsOn": [
+                    {
+                      "activity": "If_Do_Backup",
+                      "dependencyConditions": [
+                        "Succeeded"
+                      ]
+                    }
+                  ],
+                  "typeProperties": {
+                    "expression": {
+                      "value": "@{pipeline().parameters.DoDelete}",
+                      "type": "Expression"
+                    },
+                    "ifTrueActivities": [
+                      {
+                        "name": "Execute_Delete",
+                        "type": "ExecutePipeline",
+                        "typeProperties": {
+                          "pipeline": {
+                            "referenceName": "PL_DeleteRecords",
+                            "type": "PipelineReference"
+                          },
+                          "waitOnCompletion": true,
+                          "parameters": {
+                            "StartDate": "@pipeline().parameters.StartDate",
+                            "EndDate": "@pipeline().parameters.EndDate",
+                            "RunId": "@pipeline().parameters.RunId"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "name": "If_Do_Restore",
+                  "type": "IfCondition",
+                  "dependsOn": [
+                    {
+                      "activity": "If_Do_Delete",
+                      "dependencyConditions": [
+                        "Succeeded"
+                      ]
+                    }
+                  ],
+                  "typeProperties": {
+                    "expression": {
+                      "value": "@{pipeline().parameters.DoRestore}",
+                      "type": "Expression"
+                    },
+                    "ifTrueActivities": [
+                      {
+                        "name": "Execute_Restore",
+                        "type": "ExecutePipeline",
+                        "typeProperties": {
+                          "pipeline": {
+                            "referenceName": "PL_RestoreFromParquet",
+                            "type": "PipelineReference"
+                          },
+                          "waitOnCompletion": true,
+                          "parameters": {
+                            "StartDate": "@pipeline().parameters.StartDate",
+                            "EndDate": "@pipeline().parameters.EndDate",
+                            "RunId": "@pipeline().parameters.RunId"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              ],
+              "ifFalseActivities": [
+                {
+                  "name": "Fail_Invalid_DateRange",
+                  "type": "Fail",
+                  "typeProperties": {
+                    "message": "StartDate must be less than EndDate.",
+                    "errorCode": "INVALID_DATE_RANGE"
+                  }
                 }
               ]
             }
