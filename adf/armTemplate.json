@@ -12,6 +12,9 @@
     "blobConnectionString": {
       "type": "securestring"
     },
+    "sqlConnectionString": {
+      "type": "securestring"
+    },
     "blobContainer": {
       "type": "string",
       "defaultValue": "adf-backup"
@@ -55,7 +58,8 @@
         "type": "SqlServer",
         "parameters": {
           "SqlConnectionString": {
-            "type": "String"
+            "type": "SecureString",
+            "defaultValue": "[parameters('sqlConnectionString')]"
           }
         },
         "typeProperties": {

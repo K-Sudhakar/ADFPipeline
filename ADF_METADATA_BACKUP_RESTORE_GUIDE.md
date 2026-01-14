@@ -5,9 +5,10 @@ This guide outlines how to configure **two ADF pipelines**—one for **backup to
 ## 1) Linked Service (SQL Server) with Parameterized Connection String
 
 1. Create a **Linked Service** for SQL Server (on-prem) using a **Self-hosted Integration Runtime**.
-2. Add a parameter to the linked service named `SqlConnectionString`.
+2. Add a **secure** parameter to the linked service named `SqlConnectionString`.
 3. Set the connection string field to `@{linkedService().SqlConnectionString}`.
-4. At runtime, pass the connection string from the pipeline (or from a global parameter). This keeps credentials out of the ARM template payload and avoids deployment-time encryption failures when the IR has no online node.
+4. In ARM deployments, supply a `securestring` parameter (for example `sqlConnectionString`) and use it as the linked service parameter default value so ADF can encrypt a **real** connection string instead of a masked `********` placeholder. This avoids the `UserErrorInvalidDbConnectionString` error that happens when ADF attempts to encrypt a redacted connection string.
+5. At runtime, you can still override the connection string from the pipeline (or from a global parameter). This keeps credentials out of the source JSON and avoids deployment-time encryption failures when the IR has no online node.
 
 **Example (Linked Service JSON snippet):**
 ```json
@@ -17,7 +18,8 @@ This guide outlines how to configure **two ADF pipelines**—one for **backup to
     "type": "SqlServer",
     "parameters": {
       "SqlConnectionString": {
-        "type": "String"
+        "type": "SecureString",
+        "defaultValue": "[parameters('sqlConnectionString')]"
       }
     },
     "typeProperties": {
