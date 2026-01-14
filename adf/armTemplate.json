@@ -96,7 +96,7 @@
       "type": "Microsoft.DataFactory/factories/datasets",
       "apiVersion": "2018-06-01",
       "dependsOn": [
-        "[concat(parameters('factoryName'), '/linkedServices/LS_OnPremSql')]"
+        "[resourceId('Microsoft.DataFactory/factories/linkedServices', parameters('factoryName'), 'LS_OnPremSql')]"
       ],
       "properties": {
         "type": "SqlServerTable",
@@ -128,7 +128,7 @@
       "type": "Microsoft.DataFactory/factories/datasets",
       "apiVersion": "2018-06-01",
       "dependsOn": [
-        "[concat(parameters('factoryName'), '/linkedServices/LS_OnPremSql')]"
+        "[resourceId('Microsoft.DataFactory/factories/linkedServices', parameters('factoryName'), 'LS_OnPremSql')]"
       ],
       "properties": {
         "type": "SqlServerTable",
@@ -154,7 +154,7 @@
       "type": "Microsoft.DataFactory/factories/datasets",
       "apiVersion": "2018-06-01",
       "dependsOn": [
-        "[concat(parameters('factoryName'), '/linkedServices/LS_AzureBlob')]"
+        "[resourceId('Microsoft.DataFactory/factories/linkedServices', parameters('factoryName'), 'LS_AzureBlob')]"
       ],
       "properties": {
         "type": "Parquet",
@@ -194,9 +194,9 @@
       "type": "Microsoft.DataFactory/factories/pipelines",
       "apiVersion": "2018-06-01",
       "dependsOn": [
-        "[concat(parameters('factoryName'), '/datasets/DS_OnPremSqlConfig')]",
-        "[concat(parameters('factoryName'), '/datasets/DS_OnPremSqlTable')]",
-        "[concat(parameters('factoryName'), '/datasets/DS_BlobParquet')]"
+        "[resourceId('Microsoft.DataFactory/factories/datasets', parameters('factoryName'), 'DS_OnPremSqlConfig')]",
+        "[resourceId('Microsoft.DataFactory/factories/datasets', parameters('factoryName'), 'DS_OnPremSqlTable')]",
+        "[resourceId('Microsoft.DataFactory/factories/datasets', parameters('factoryName'), 'DS_BlobParquet')]"
       ],
       "properties": {
         "parameters": {
@@ -317,9 +317,9 @@
       "type": "Microsoft.DataFactory/factories/pipelines",
       "apiVersion": "2018-06-01",
       "dependsOn": [
-        "[concat(parameters('factoryName'), '/datasets/DS_OnPremSqlConfig')]",
-        "[concat(parameters('factoryName'), '/datasets/DS_OnPremSqlTable')]",
-        "[concat(parameters('factoryName'), '/datasets/DS_BlobParquet')]"
+        "[resourceId('Microsoft.DataFactory/factories/datasets', parameters('factoryName'), 'DS_OnPremSqlConfig')]",
+        "[resourceId('Microsoft.DataFactory/factories/datasets', parameters('factoryName'), 'DS_OnPremSqlTable')]",
+        "[resourceId('Microsoft.DataFactory/factories/datasets', parameters('factoryName'), 'DS_BlobParquet')]"
       ],
       "properties": {
         "parameters": {
