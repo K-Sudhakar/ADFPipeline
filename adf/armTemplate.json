@@ -56,14 +56,8 @@
       ],
       "properties": {
         "type": "SqlServer",
-        "parameters": {
-          "SqlConnectionString": {
-            "type": "String",
-            "defaultValue": "[parameters('sqlConnectionString')]"
-          }
-        },
         "typeProperties": {
-          "connectionString": "@{linkedService().SqlConnectionString}"
+          "connectionString": "[parameters('sqlConnectionString')]"
         },
         "connectVia": {
           "referenceName": "[parameters('selfHostedIrName')]",
@@ -80,14 +74,8 @@
       ],
       "properties": {
         "type": "AzureBlobStorage",
-        "parameters": {
-          "BlobConnectionString": {
-            "type": "String",
-            "defaultValue": "[parameters('blobConnectionString')]"
-          }
-        },
         "typeProperties": {
-          "connectionString": "@{linkedService().BlobConnectionString}"
+          "connectionString": "[parameters('blobConnectionString')]"
         }
       }
     },
@@ -106,17 +94,11 @@
           },
           "tableName": {
             "type": "String"
-          },
-          "SqlConnectionString": {
-            "type": "String"
           }
         },
         "linkedServiceName": {
           "referenceName": "LS_OnPremSql",
-          "type": "LinkedServiceReference",
-          "parameters": {
-            "SqlConnectionString": "@dataset().SqlConnectionString"
-          }
+          "type": "LinkedServiceReference"
         },
         "typeProperties": {
           "tableName": "@{dataset().schemaName}.@{dataset().tableName}"
@@ -132,17 +114,9 @@
       ],
       "properties": {
         "type": "SqlServerTable",
-        "parameters": {
-          "SqlConnectionString": {
-            "type": "String"
-          }
-        },
         "linkedServiceName": {
           "referenceName": "LS_OnPremSql",
-          "type": "LinkedServiceReference",
-          "parameters": {
-            "SqlConnectionString": "@dataset().SqlConnectionString"
-          }
+          "type": "LinkedServiceReference"
         },
         "typeProperties": {
           "tableName": "dbo.AdfBackupConfig"
@@ -167,17 +141,11 @@
           },
           "fileName": {
             "type": "String"
-          },
-          "BlobConnectionString": {
-            "type": "String"
           }
         },
         "linkedServiceName": {
           "referenceName": "LS_AzureBlob",
-          "type": "LinkedServiceReference",
-          "parameters": {
-            "BlobConnectionString": "@dataset().BlobConnectionString"
-          }
+          "type": "LinkedServiceReference"
         },
         "typeProperties": {
           "location": {
@@ -200,12 +168,6 @@
       ],
       "properties": {
         "parameters": {
-          "SqlConnectionString": {
-            "type": "String"
-          },
-          "BlobConnectionString": {
-            "type": "String"
-          },
           "BlobContainer": {
             "type": "String",
             "defaultValue": "[parameters('blobContainer')]"
@@ -231,10 +193,7 @@
               },
               "dataset": {
                 "referenceName": "DS_OnPremSqlConfig",
-                "type": "DatasetReference",
-                "parameters": {
-                  "SqlConnectionString": "@pipeline().parameters.SqlConnectionString"
-                }
+                "type": "DatasetReference"
               },
               "firstRowOnly": false
             }
@@ -288,8 +247,7 @@
                       "type": "DatasetReference",
                       "parameters": {
                         "schemaName": "@item().TableSchema",
-                        "tableName": "@item().TableName",
-                        "SqlConnectionString": "@pipeline().parameters.SqlConnectionString"
+                        "tableName": "@item().TableName"
                       }
                     }
                   ],
@@ -300,8 +258,7 @@
                       "parameters": {
                         "container": "@pipeline().parameters.BlobContainer",
                         "folderPath": "@item().TargetFolder",
-                        "fileName": "@{concat(item().TableSchema, '_', item().TableName, '.parquet')}",
-                        "BlobConnectionString": "@pipeline().parameters.BlobConnectionString"
+                        "fileName": "@{concat(item().TableSchema, '_', item().TableName, '.parquet')}"
                       }
                     }
                   ]
@@ -323,12 +280,6 @@
       ],
       "properties": {
         "parameters": {
-          "SqlConnectionString": {
-            "type": "String"
-          },
-          "BlobConnectionString": {
-            "type": "String"
-          },
           "BlobContainer": {
             "type": "String",
             "defaultValue": "[parameters('blobContainer')]"
@@ -354,10 +305,7 @@
               },
               "dataset": {
                 "referenceName": "DS_OnPremSqlConfig",
-                "type": "DatasetReference",
-                "parameters": {
-                  "SqlConnectionString": "@pipeline().parameters.SqlConnectionString"
-                }
+                "type": "DatasetReference"
               },
               "firstRowOnly": false
             }
@@ -410,8 +358,7 @@
                       "parameters": {
                         "container": "@pipeline().parameters.BlobContainer",
                         "folderPath": "@item().TargetFolder",
-                        "fileName": "@{concat(item().TableSchema, '_', item().TableName, '.parquet')}",
-                        "BlobConnectionString": "@pipeline().parameters.BlobConnectionString"
+                        "fileName": "@{concat(item().TableSchema, '_', item().TableName, '.parquet')}"
                       }
                     }
                   ],
@@ -421,8 +368,7 @@
                       "type": "DatasetReference",
                       "parameters": {
                         "schemaName": "@item().TableSchema",
-                        "tableName": "@item().TableName",
-                        "SqlConnectionString": "@pipeline().parameters.SqlConnectionString"
+                        "tableName": "@item().TableName"
                       }
                     }
                   ]
