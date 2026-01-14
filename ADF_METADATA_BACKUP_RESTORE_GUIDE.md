@@ -7,7 +7,7 @@ This guide outlines how to configure **two ADF pipelines**—one for **backup to
 1. Create a **Linked Service** for SQL Server (on-prem) using a **Self-hosted Integration Runtime**.
 2. Add a parameter to the linked service named `SqlConnectionString`.
 3. Set the connection string field to `@{linkedService().SqlConnectionString}`.
-4. At runtime, pass the connection string from the pipeline (or from a global parameter).
+4. At runtime, pass the connection string from the pipeline (or from a global parameter). This keeps credentials out of the ARM template payload and avoids deployment-time encryption failures when the IR has no online node.
 
 **Example (Linked Service JSON snippet):**
 ```json
