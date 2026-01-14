@@ -9,9 +9,6 @@
       "type": "string",
       "defaultValue": "[resourceGroup().location]"
     },
-    "sqlConnectionString": {
-      "type": "securestring"
-    },
     "blobConnectionString": {
       "type": "securestring"
     },
@@ -56,8 +53,13 @@
       ],
       "properties": {
         "type": "SqlServer",
+        "parameters": {
+          "SqlConnectionString": {
+            "type": "String"
+          }
+        },
         "typeProperties": {
-          "connectionString": "[parameters('sqlConnectionString')]"
+          "connectionString": "@{linkedService().SqlConnectionString}"
         },
         "connectVia": {
           "referenceName": "[parameters('selfHostedIrName')]",
@@ -94,11 +96,17 @@
           },
           "tableName": {
             "type": "String"
+          },
+          "SqlConnectionString": {
+            "type": "String"
           }
         },
         "linkedServiceName": {
           "referenceName": "LS_OnPremSql",
-          "type": "LinkedServiceReference"
+          "type": "LinkedServiceReference",
+          "parameters": {
+            "SqlConnectionString": "@dataset().SqlConnectionString"
+          }
         },
         "typeProperties": {
           "tableName": "@{dataset().schemaName}.@{dataset().tableName}"
@@ -114,9 +122,17 @@
       ],
       "properties": {
         "type": "SqlServerTable",
+        "parameters": {
+          "SqlConnectionString": {
+            "type": "String"
+          }
+        },
         "linkedServiceName": {
           "referenceName": "LS_OnPremSql",
-          "type": "LinkedServiceReference"
+          "type": "LinkedServiceReference",
+          "parameters": {
+            "SqlConnectionString": "@dataset().SqlConnectionString"
+          }
         },
         "typeProperties": {
           "tableName": "dbo.AdfBackupConfig"
@@ -162,6 +178,8 @@
       "type": "Microsoft.DataFactory/factories/pipelines",
       "apiVersion": "2018-06-01",
       "dependsOn": [
+        "[resourceId('Microsoft.DataFactory/factories/linkedServices', parameters('factoryName'), 'LS_OnPremSql')]",
+        "[resourceId('Microsoft.DataFactory/factories/linkedServices', parameters('factoryName'), 'LS_AzureBlob')]",
         "[resourceId('Microsoft.DataFactory/factories/datasets', parameters('factoryName'), 'DS_OnPremSqlConfig')]",
         "[resourceId('Microsoft.DataFactory/factories/datasets', parameters('factoryName'), 'DS_OnPremSqlTable')]",
         "[resourceId('Microsoft.DataFactory/factories/datasets', parameters('factoryName'), 'DS_BlobParquet')]"
@@ -171,6 +189,9 @@
           "BlobContainer": {
             "type": "String",
             "defaultValue": "[parameters('blobContainer')]"
+          },
+          "SqlConnectionString": {
+            "type": "String"
           }
         },
         "activities": [
@@ -193,7 +214,10 @@
               },
               "dataset": {
                 "referenceName": "DS_OnPremSqlConfig",
-                "type": "DatasetReference"
+                "type": "DatasetReference",
+                "parameters": {
+                  "SqlConnectionString": "@pipeline().parameters.SqlConnectionString"
+                }
               },
               "firstRowOnly": false
             }
@@ -247,7 +271,8 @@
                       "type": "DatasetReference",
                       "parameters": {
                         "schemaName": "@item().TableSchema",
-                        "tableName": "@item().TableName"
+                        "tableName": "@item().TableName",
+                        "SqlConnectionString": "@pipeline().parameters.SqlConnectionString"
                       }
                     }
                   ],
@@ -274,6 +299,8 @@
       "type": "Microsoft.DataFactory/factories/pipelines",
       "apiVersion": "2018-06-01",
       "dependsOn": [
+        "[resourceId('Microsoft.DataFactory/factories/linkedServices', parameters('factoryName'), 'LS_OnPremSql')]",
+        "[resourceId('Microsoft.DataFactory/factories/linkedServices', parameters('factoryName'), 'LS_AzureBlob')]",
         "[resourceId('Microsoft.DataFactory/factories/datasets', parameters('factoryName'), 'DS_OnPremSqlConfig')]",
         "[resourceId('Microsoft.DataFactory/factories/datasets', parameters('factoryName'), 'DS_OnPremSqlTable')]",
         "[resourceId('Microsoft.DataFactory/factories/datasets', parameters('factoryName'), 'DS_BlobParquet')]"
@@ -283,6 +310,9 @@
           "BlobContainer": {
             "type": "String",
             "defaultValue": "[parameters('blobContainer')]"
+          },
+          "SqlConnectionString": {
+            "type": "String"
           }
         },
         "activities": [
@@ -305,7 +335,10 @@
               },
               "dataset": {
                 "referenceName": "DS_OnPremSqlConfig",
-                "type": "DatasetReference"
+                "type": "DatasetReference",
+                "parameters": {
+                  "SqlConnectionString": "@pipeline().parameters.SqlConnectionString"
+                }
               },
               "firstRowOnly": false
             }
@@ -368,7 +401,8 @@
                       "type": "DatasetReference",
                       "parameters": {
                         "schemaName": "@item().TableSchema",
-                        "tableName": "@item().TableName"
+                        "tableName": "@item().TableName",
+                        "SqlConnectionString": "@pipeline().parameters.SqlConnectionString"
                       }
                     }
                   ]
