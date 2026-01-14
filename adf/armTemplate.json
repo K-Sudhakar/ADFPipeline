@@ -5,6 +5,10 @@
     "factoryName": {
       "type": "string"
     },
+    "factoryLocation": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]"
+    },
     "sqlConnectionString": {
       "type": "securestring"
     },
@@ -22,18 +26,38 @@
   },
   "resources": [
     {
+      "name": "[parameters('factoryName')]",
+      "type": "Microsoft.DataFactory/factories",
+      "apiVersion": "2018-06-01",
+      "location": "[parameters('factoryLocation')]",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "properties": {}
+    },
+    {
+      "name": "[concat(parameters('factoryName'), '/', parameters('selfHostedIrName'))]",
+      "type": "Microsoft.DataFactory/factories/integrationRuntimes",
+      "apiVersion": "2018-06-01",
+      "dependsOn": [
+        "[resourceId('Microsoft.DataFactory/factories', parameters('factoryName'))]"
+      ],
+      "properties": {
+        "type": "SelfHosted"
+      }
+    },
+    {
       "name": "[concat(parameters('factoryName'), '/LS_OnPremSql')]",
       "type": "Microsoft.DataFactory/factories/linkedServices",
       "apiVersion": "2018-06-01",
+      "dependsOn": [
+        "[resourceId('Microsoft.DataFactory/factories', parameters('factoryName'))]",
+        "[resourceId('Microsoft.DataFactory/factories/integrationRuntimes', parameters('factoryName'), parameters('selfHostedIrName'))]"
+      ],
       "properties": {
         "type": "SqlServer",
-        "parameters": {
-          "SqlConnectionString": {
-            "type": "String"
-          }
-        },
         "typeProperties": {
-          "connectionString": "@{linkedService().SqlConnectionString}"
+          "connectionString": "[parameters('sqlConnectionString')]"
         },
         "connectVia": {
           "referenceName": "[parameters('selfHostedIrName')]",
@@ -45,15 +69,13 @@
       "name": "[concat(parameters('factoryName'), '/LS_AzureBlob')]",
       "type": "Microsoft.DataFactory/factories/linkedServices",
       "apiVersion": "2018-06-01",
+      "dependsOn": [
+        "[resourceId('Microsoft.DataFactory/factories', parameters('factoryName'))]"
+      ],
       "properties": {
         "type": "AzureBlobStorage",
-        "parameters": {
-          "BlobConnectionString": {
-            "type": "String"
-          }
-        },
         "typeProperties": {
-          "connectionString": "@{linkedService().BlobConnectionString}"
+          "connectionString": "[parameters('blobConnectionString')]"
         }
       }
     },
@@ -62,7 +84,7 @@
       "type": "Microsoft.DataFactory/factories/datasets",
       "apiVersion": "2018-06-01",
       "dependsOn": [
-        "[concat(parameters('factoryName'), '/linkedServices/LS_OnPremSql')]"
+        "[resourceId('Microsoft.DataFactory/factories/linkedServices', parameters('factoryName'), 'LS_OnPremSql')]"
       ],
       "properties": {
         "type": "SqlServerTable",
@@ -72,17 +94,11 @@
           },
           "tableName": {
             "type": "String"
-          },
-          "SqlConnectionString": {
-            "type": "String"
           }
         },
         "linkedServiceName": {
           "referenceName": "LS_OnPremSql",
-          "type": "LinkedServiceReference",
-          "parameters": {
-            "SqlConnectionString": "@dataset().SqlConnectionString"
-          }
+          "type": "LinkedServiceReference"
         },
         "typeProperties": {
           "tableName": "@{dataset().schemaName}.@{dataset().tableName}"
@@ -94,21 +110,13 @@
       "type": "Microsoft.DataFactory/factories/datasets",
       "apiVersion": "2018-06-01",
       "dependsOn": [
-        "[concat(parameters('factoryName'), '/linkedServices/LS_OnPremSql')]"
+        "[resourceId('Microsoft.DataFactory/factories/linkedServices', parameters('factoryName'), 'LS_OnPremSql')]"
       ],
       "properties": {
         "type": "SqlServerTable",
-        "parameters": {
-          "SqlConnectionString": {
-            "type": "String"
-          }
-        },
         "linkedServiceName": {
           "referenceName": "LS_OnPremSql",
-          "type": "LinkedServiceReference",
-          "parameters": {
-            "SqlConnectionString": "@dataset().SqlConnectionString"
-          }
+          "type": "LinkedServiceReference"
         },
         "typeProperties": {
           "tableName": "dbo.AdfBackupConfig"
@@ -120,7 +128,7 @@
       "type": "Microsoft.DataFactory/factories/datasets",
       "apiVersion": "2018-06-01",
       "dependsOn": [
-        "[concat(parameters('factoryName'), '/linkedServices/LS_AzureBlob')]"
+        "[resourceId('Microsoft.DataFactory/factories/linkedServices', parameters('factoryName'), 'LS_AzureBlob')]"
       ],
       "properties": {
         "type": "Parquet",
@@ -133,17 +141,11 @@
           },
           "fileName": {
             "type": "String"
-          },
-          "BlobConnectionString": {
-            "type": "String"
           }
         },
         "linkedServiceName": {
           "referenceName": "LS_AzureBlob",
-          "type": "LinkedServiceReference",
-          "parameters": {
-            "BlobConnectionString": "@dataset().BlobConnectionString"
-          }
+          "type": "LinkedServiceReference"
         },
         "typeProperties": {
           "location": {
@@ -160,18 +162,12 @@
       "type": "Microsoft.DataFactory/factories/pipelines",
       "apiVersion": "2018-06-01",
       "dependsOn": [
-        "[concat(parameters('factoryName'), '/datasets/DS_OnPremSqlConfig')]",
-        "[concat(parameters('factoryName'), '/datasets/DS_OnPremSqlTable')]",
-        "[concat(parameters('factoryName'), '/datasets/DS_BlobParquet')]"
+        "[resourceId('Microsoft.DataFactory/factories/datasets', parameters('factoryName'), 'DS_OnPremSqlConfig')]",
+        "[resourceId('Microsoft.DataFactory/factories/datasets', parameters('factoryName'), 'DS_OnPremSqlTable')]",
+        "[resourceId('Microsoft.DataFactory/factories/datasets', parameters('factoryName'), 'DS_BlobParquet')]"
       ],
       "properties": {
         "parameters": {
-          "SqlConnectionString": {
-            "type": "String"
-          },
-          "BlobConnectionString": {
-            "type": "String"
-          },
           "BlobContainer": {
             "type": "String",
             "defaultValue": "[parameters('blobContainer')]"
@@ -197,10 +193,7 @@
               },
               "dataset": {
                 "referenceName": "DS_OnPremSqlConfig",
-                "type": "DatasetReference",
-                "parameters": {
-                  "SqlConnectionString": "@pipeline().parameters.SqlConnectionString"
-                }
+                "type": "DatasetReference"
               },
               "firstRowOnly": false
             }
@@ -254,8 +247,7 @@
                       "type": "DatasetReference",
                       "parameters": {
                         "schemaName": "@item().TableSchema",
-                        "tableName": "@item().TableName",
-                        "SqlConnectionString": "@pipeline().parameters.SqlConnectionString"
+                        "tableName": "@item().TableName"
                       }
                     }
                   ],
@@ -266,8 +258,7 @@
                       "parameters": {
                         "container": "@pipeline().parameters.BlobContainer",
                         "folderPath": "@item().TargetFolder",
-                        "fileName": "@{concat(item().TableSchema, '_', item().TableName, '.parquet')}",
-                        "BlobConnectionString": "@pipeline().parameters.BlobConnectionString"
+                        "fileName": "@{concat(item().TableSchema, '_', item().TableName, '.parquet')}"
                       }
                     }
                   ]
@@ -283,18 +274,12 @@
       "type": "Microsoft.DataFactory/factories/pipelines",
       "apiVersion": "2018-06-01",
       "dependsOn": [
-        "[concat(parameters('factoryName'), '/datasets/DS_OnPremSqlConfig')]",
-        "[concat(parameters('factoryName'), '/datasets/DS_OnPremSqlTable')]",
-        "[concat(parameters('factoryName'), '/datasets/DS_BlobParquet')]"
+        "[resourceId('Microsoft.DataFactory/factories/datasets', parameters('factoryName'), 'DS_OnPremSqlConfig')]",
+        "[resourceId('Microsoft.DataFactory/factories/datasets', parameters('factoryName'), 'DS_OnPremSqlTable')]",
+        "[resourceId('Microsoft.DataFactory/factories/datasets', parameters('factoryName'), 'DS_BlobParquet')]"
       ],
       "properties": {
         "parameters": {
-          "SqlConnectionString": {
-            "type": "String"
-          },
-          "BlobConnectionString": {
-            "type": "String"
-          },
           "BlobContainer": {
             "type": "String",
             "defaultValue": "[parameters('blobContainer')]"
@@ -320,10 +305,7 @@
               },
               "dataset": {
                 "referenceName": "DS_OnPremSqlConfig",
-                "type": "DatasetReference",
-                "parameters": {
-                  "SqlConnectionString": "@pipeline().parameters.SqlConnectionString"
-                }
+                "type": "DatasetReference"
               },
               "firstRowOnly": false
             }
@@ -376,8 +358,7 @@
                       "parameters": {
                         "container": "@pipeline().parameters.BlobContainer",
                         "folderPath": "@item().TargetFolder",
-                        "fileName": "@{concat(item().TableSchema, '_', item().TableName, '.parquet')}",
-                        "BlobConnectionString": "@pipeline().parameters.BlobConnectionString"
+                        "fileName": "@{concat(item().TableSchema, '_', item().TableName, '.parquet')}"
                       }
                     }
                   ],
@@ -387,8 +368,7 @@
                       "type": "DatasetReference",
                       "parameters": {
                         "schemaName": "@item().TableSchema",
-                        "tableName": "@item().TableName",
-                        "SqlConnectionString": "@pipeline().parameters.SqlConnectionString"
+                        "tableName": "@item().TableName"
                       }
                     }
                   ]
