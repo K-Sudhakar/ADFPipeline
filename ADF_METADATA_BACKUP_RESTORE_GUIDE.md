@@ -141,6 +141,7 @@ Example: `folderPath = @dataset().folderPath`, `fileName = @dataset().fileName`.
 
 ## 7) Operational Tips
 
+* Ensure your **SelfHostedIR** is installed, registered, and **online** before deploying the SQL linked service. If the IR has no online instance, ADF cannot encrypt the SQL connection string and deployment fails with `Failed to encrypt linked service credentials ... No online instance.`.
 * Consider **schema drift**: ensure columns in Parquet match SQL table schema.
 * Add **validation** activities (e.g., row count checks) after copy.
 * Secure the connection string via **Key Vault** and pass it as a parameter.
