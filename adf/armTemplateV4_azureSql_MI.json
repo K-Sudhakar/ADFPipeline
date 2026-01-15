@@ -473,7 +473,7 @@
                   ],
                   "typeProperties": {
                     "expression": {
-                      "value": "@{and(equals(item().UseDateRange, 1), not(equals(item().FilterColumn, null)))}",
+                      "value": "@and(equals(item().UseDateRange, 1), not(equals(item().FilterColumn, null)))",
                       "type": "Expression"
                     },
                     "ifTrueActivities": [
@@ -569,7 +569,7 @@
                         "type": "IfCondition",
                         "typeProperties": {
                           "expression": {
-                            "value": "@{equals(item().AllowFullDelete, 1)}",
+                          "value": "@equals(item().AllowFullDelete, 1)",
                             "type": "Expression"
                           },
                           "ifTrueActivities": [
@@ -970,7 +970,7 @@
             "dependsOn": [],
             "typeProperties": {
               "expression": {
-                "value": "@{less(pipeline().parameters.StartDate, pipeline().parameters.EndDate)}",
+                "value": "@less(pipeline().parameters.StartDate, pipeline().parameters.EndDate)",
                 "type": "Expression"
               },
               "ifTrueActivities": [
@@ -979,7 +979,7 @@
                   "type": "IfCondition",
                   "typeProperties": {
                     "expression": {
-                      "value": "@{pipeline().parameters.DoBackup}",
+                      "value": "@pipeline().parameters.DoBackup",
                       "type": "Expression"
                     },
                     "ifTrueActivities": [
@@ -1015,7 +1015,7 @@
                   ],
                   "typeProperties": {
                     "expression": {
-                      "value": "@{pipeline().parameters.DoDelete}",
+                      "value": "@pipeline().parameters.DoDelete",
                       "type": "Expression"
                     },
                     "ifTrueActivities": [
@@ -1051,7 +1051,7 @@
                   ],
                   "typeProperties": {
                     "expression": {
-                      "value": "@{pipeline().parameters.DoRestore}",
+                      "value": "@pipeline().parameters.DoRestore",
                       "type": "Expression"
                     },
                     "ifTrueActivities": [
