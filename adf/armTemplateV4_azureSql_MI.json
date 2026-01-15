@@ -220,7 +220,7 @@
             "userProperties": [],
             "typeProperties": {
               "items": "@activity('Lookup_BackupConfig').output.value",
-              "isSequential": "@pipeline().parameters.IsSequential",
+              "isSequential": false,
               "activities": [
                 {
                   "name": "Log_Backup_Running",
@@ -434,7 +434,7 @@
             "userProperties": [],
             "typeProperties": {
               "items": "@activity('Lookup_DeleteConfig').output.value",
-              "isSequential": "@pipeline().parameters.IsSequential",
+              "isSequential": false,
               "activities": [
                 {
                   "name": "Log_Delete_Running",
@@ -808,7 +808,7 @@
             "userProperties": [],
             "typeProperties": {
               "items": "@activity('Lookup_RestoreConfig').output.value",
-              "isSequential": "@pipeline().parameters.IsSequential",
+              "isSequential": false,
               "activities": [
                 {
                   "name": "Log_Restore_Running",
